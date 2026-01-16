@@ -50,58 +50,100 @@ echo "✅ Done organizing files by type."
 organize_by_extension() {
   local root_dir="${1:-.}"
   cd "$root_dir" || { echo "❌ Directory not found: $root_dir"; return 1; }
-
   echo "📂 Recursively organizing files in: $root_dir"
-
+  
+  # Create temporary file to track processed files
+  local temp_file=$(mktemp)
+  
+  # Find all files and collect them with metadata
   find "$root_dir" -type f | while read -r file; do
+    # Skip hidden files
     [[ "$(basename "$file")" == .* ]] && continue
-
-    # Skip files already inside type folders
+    
+    # Skip files already inside Extension_ folders or EXISTING folder
     rel_path="${file#$root_dir/}"
     top_folder="${rel_path%%/*}"
-    [[ -d "$root_dir/$top_folder" && "$top_folder" =~ ^[A-Z0-9]{2,5}$ ]] && continue
-
+    [[ "$top_folder" =~ ^Extension_ || "$top_folder" == "EXISTING" ]] && continue
+    
     filename="$(basename "$file")"
     base="${filename%.*}"
     ext="${filename##*.}"
-    [[ "$ext" == "$filename" ]] && continue  # Skip files without extension
-
+    
+    # Skip files without extension
+    [[ "$ext" == "$filename" ]] && continue
+    
     ext_upper="${(U)ext}"
-    dest_dir="$root_dir/$ext_upper"
+    dest_dir="$root_dir/Extension_$ext_upper"              # ✨ CHANGED
     dest_file="$dest_dir/$filename"
-
+    existing_dir="$root_dir/EXISTING/Extension_$ext_upper" # ✨ CHANGED
+    
+    # Create destination directory
     mkdir -p "$dest_dir"
-
-    if [[ -e "$dest_file" ]]; then
-      # Check if content is exactly the same
-      incoming_hash=$(shasum "$file" | awk '{print $1}')
+    
+    # Get file size and hash
+    file_size=$(stat -f%z "$file" 2>/dev/null || stat -c%s "$file" 2>/dev/null)
+    file_hash=$(shasum "$file" | awk '{print $1}')
+    
+    if [[ ! -e "$dest_file" ]]; then
+      # Case 1: No conflict, move normally
+      mv "$file" "$dest_file"
+      echo "✅ Moved: $file → $dest_file"
+    else
+      # File with same name exists, check size and content
+      existing_size=$(stat -f%z "$dest_file" 2>/dev/null || stat -c%s "$dest_file" 2>/dev/null)
       existing_hash=$(shasum "$dest_file" | awk '{print $1}')
-
-      if [[ "$incoming_hash" == "$existing_hash" ]]; then
-        echo "🗑️  Duplicate found and removed: $file"
-        rm "$file"
-        continue
-      else
-        # Conflict: different content, rename and move
+      
+      if [[ "$file_size" != "$existing_size" ]]; then
+        # Case 2: Same name, different size - rename and move to type folder
         count=1
         while [[ -e "$dest_dir/${base}_$count.$ext" ]]; do
           ((count++))
         done
         new_name="${base}_$count.$ext"
         mv "$file" "$dest_dir/$new_name"
-        echo "📁 Conflict moved and renamed: $file → $dest_dir/$new_name"
-        continue
+        echo "📁 Different size - renamed and moved: $file → $dest_dir/$new_name"
+      elif [[ "$file_hash" == "$existing_hash" ]]; then
+        # Case 4: Same name, same size, same content - remove duplicate
+        echo "🗑️  Exact duplicate removed: $file"
+        rm "$file"
+      else
+        # Case 3 & 5: Same name, same size, different content - move to EXISTING
+        mkdir -p "$existing_dir"
+        existing_dest="$existing_dir/$filename"
+        
+        if [[ ! -e "$existing_dest" ]]; then
+          # First conflict file goes to EXISTING with original name
+          mv "$file" "$existing_dest"
+          echo "🔄 Different content - moved to EXISTING: $file → $existing_dest"
+        else
+          # Additional conflicts get numbered in EXISTING
+          count=1
+          while [[ -e "$existing_dir/${base}_$count.$ext" ]]; do
+            # Check if this one is also a duplicate
+            existing_conflict_hash=$(shasum "$existing_dir/${base}_$count.$ext" | awk '{print $1}')
+            if [[ "$file_hash" == "$existing_conflict_hash" ]]; then
+              echo "🗑️  Duplicate found in EXISTING - removed: $file"
+              rm "$file"
+              break
+            fi
+            ((count++))
+          done
+          
+          # If file wasn't removed as duplicate, move it with new number
+          if [[ -e "$file" ]]; then
+            new_existing_name="${base}_$count.$ext"
+            mv "$file" "$existing_dir/$new_existing_name"
+            echo "🔄 Different content - moved to EXISTING: $file → $existing_dir/$new_existing_name"
+          fi
+        fi
       fi
     fi
-
-    # Normal move
-    mv "$file" "$dest_file"
-    echo "✅ Moved: $file → $dest_file"
   done
-
-  echo "🎉 Done organizing with true deduplication + renaming."
+  
+  # Clean up
+  rm -f "$temp_file"
+  echo "🎉 Done organizing with proper deduplication and conflict resolution."
 }
-
 
 # Apply the change without restarting terminal: source ~/.zshrc
 ### Then use it anytime like: organize_by_extension ~/Downloads/mix
