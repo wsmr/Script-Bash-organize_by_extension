@@ -19,11 +19,11 @@ MIN_FILE_SIZE=0        # Minimum file size (0 = no limit)
 MAX_FILE_SIZE=0        # Maximum file size (0 = no limit)
 
 # Folder naming with timestamp
-USE_TIMESTAMP=true     # Set to false to use simple folder names like "JPG"
+USE_TIMESTAMP=false    # Set to true to add timestamp like Extension_JPG_20250117
 DATE_FORMAT="%Y%m%d"   # Date format for folder names
 
 # Default folders to ignore (case-insensitive)
-DEFAULT_IGNORE_FOLDERS="existing,error,logs"
+DEFAULT_IGNORE_FOLDERS="logs,cache,temp"
 
 # =============================================================================
 # SCRIPT VARIABLES
@@ -145,7 +145,7 @@ move_to_error() {
     local reason="$2"
     
     if [[ -z "$ERROR_DIR" ]]; then
-        ERROR_DIR="$ROOT_DIR/ERROR"
+        ERROR_DIR="$ROOT_DIR/Extension_ERROR"  # ✨ CHANGED
         mkdir -p "$ERROR_DIR"
     fi
     
@@ -173,9 +173,9 @@ move_to_error() {
 get_folder_name() {
     local ext="$1"
     if [[ "$USE_TIMESTAMP" == "true" ]]; then
-        echo "${ext}_${TIMESTAMP}"
+        echo "Extension_${ext}_${TIMESTAMP}"  # ✨ CHANGED
     else
-        echo "$ext"
+        echo "Extension_${ext}"  # ✨ CHANGED
     fi
 }
 
@@ -245,8 +245,8 @@ while IFS= read -r -d '' file; do
         continue
     fi
     
-    # Skip files already in organized folders or error folder
-    if [[ -d "$ROOT_DIR/$top_folder" && ("$top_folder" =~ ^[A-Z0-9_]{2,15}$ || "$top_folder" == "ERROR") ]]; then
+    # ✨ FIXED: Skip files already in Extension_ folders
+    if [[ "$top_folder" =~ ^Extension_ ]]; then
         continue
     fi
     
@@ -293,7 +293,7 @@ while IFS= read -r -d '' file; do
     folder_name=$(get_folder_name "$ext_upper")
     dest_dir="$ROOT_DIR/$folder_name"
     dest_file="$dest_dir/$filename"
-    existing_dir="$ROOT_DIR/EXISTING/$folder_name"
+    existing_dir="$ROOT_DIR/Extension_EXISTING/$folder_name"  # ✨ CHANGED
     
     # Create destination directory
     mkdir -p "$dest_dir"
@@ -338,7 +338,7 @@ while IFS= read -r -d '' file; do
                 ((error_files++))
             fi
         elif [[ "$file_hash" == "$existing_hash" ]]; then
-            # Case 4: Same name, same size, same content - remove duplicate
+            # Case 3: Same name, same size, same content - remove duplicate
             if rm "$file"; then
                 print_colored "$PURPLE" "🗑️  Duplicate removed: $file"
                 log_message "REMOVED: Exact duplicate - $file"
@@ -348,22 +348,22 @@ while IFS= read -r -d '' file; do
                 ((error_files++))
             fi
         else
-            # Case 3 & 5: Same name, same size, different content - move to EXISTING
+            # Case 4: Same name, same size, different content - move to Extension_EXISTING
             mkdir -p "$existing_dir"
             existing_dest="$existing_dir/$filename"
             
             if [[ ! -e "$existing_dest" ]]; then
-                # First conflict file goes to EXISTING with original name
+                # First conflict file goes to Extension_EXISTING with original name
                 if mv "$file" "$existing_dest"; then
-                    print_colored "$CYAN" "🔄 Different content - moved to EXISTING: $file → $existing_dest"
+                    print_colored "$CYAN" "🔄 Different content - moved to Extension_EXISTING: $file → $existing_dest"
                     log_message "EXISTING: Different content - $file → $existing_dest"
                     ((moved_files++))
                 else
-                    move_to_error "$file" "Failed to move to EXISTING"
+                    move_to_error "$file" "Failed to move to Extension_EXISTING"
                     ((error_files++))
                 fi
             else
-                # Additional conflicts get numbered in EXISTING
+                # Additional conflicts get numbered in Extension_EXISTING
                 count=1
                 duplicate_found=false
                 
@@ -371,8 +371,8 @@ while IFS= read -r -d '' file; do
                     if existing_conflict_hash=$(shasum "$existing_dir/${base}_$count.$ext" 2>/dev/null | awk '{print $1}'); then
                         if [[ "$file_hash" == "$existing_conflict_hash" ]]; then
                             rm "$file"
-                            print_colored "$PURPLE" "🗑️  Duplicate in EXISTING - removed: $file"
-                            log_message "REMOVED: Duplicate in EXISTING - $file"
+                            print_colored "$PURPLE" "🗑️  Duplicate in Extension_EXISTING - removed: $file"
+                            log_message "REMOVED: Duplicate in Extension_EXISTING - $file"
                             ((removed_files++))
                             duplicate_found=true
                             break
@@ -385,11 +385,11 @@ while IFS= read -r -d '' file; do
                 if [[ "$duplicate_found" == false && -e "$file" ]]; then
                     new_existing_name="${base}_$count.$ext"
                     if mv "$file" "$existing_dir/$new_existing_name"; then
-                        print_colored "$CYAN" "🔄 Different content - moved to EXISTING: $file → $existing_dir/$new_existing_name"
+                        print_colored "$CYAN" "🔄 Different content - moved to Extension_EXISTING: $file → $existing_dir/$new_existing_name"
                         log_message "EXISTING: Different content - $file → $existing_dir/$new_existing_name"
                         ((moved_files++))
                     else
-                        move_to_error "$file" "Failed to move to EXISTING with new name"
+                        move_to_error "$file" "Failed to move to Extension_EXISTING with new name"
                         ((error_files++))
                     fi
                 fi
@@ -417,5 +417,7 @@ echo ""
 print_colored "$CYAN" "📝 Detailed log saved to: $LOG_FILE"
 
 if [[ $error_files -gt 0 ]]; then
-    print_colored "$YELLOW" "⚠️  $error_files files moved to ERROR folder due to issues"
+    print_colored "$YELLOW" "⚠️  $error_files files moved to Extension_ERROR folder due to issues"
 fi
+
+Extension_ERROR/
